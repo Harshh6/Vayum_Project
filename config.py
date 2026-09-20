@@ -25,6 +25,7 @@ class Config:
 
     # --- API keys (never hardcoded, always from the environment) ----------
     WEATHER_API_KEY = os.environ.get("WEATHER_API_KEY", "")
+    CPCB_API_KEY = os.environ.get("CPCB_API_KEY", "")
     OPENAQ_API_KEY = os.environ.get("OPENAQ_API_KEY", "")
 
     # --- paths --------------------------------------------------------------
@@ -43,6 +44,7 @@ class Config:
 
     # --- external endpoints ---------------------------------------------
     OPENAQ_BASE_URL = "https://api.openaq.org/v3"
+    CPCB_API_URL = "https://api.data.gov.in/resource/3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69"
     WEATHERAPI_BASE_URL = "https://api.weatherapi.com/v1"
     OPEN_METEO_FORECAST_URL = "https://api.open-meteo.com/v1/forecast"
     OPEN_METEO_ARCHIVE_URL = "https://archive-api.open-meteo.com/v1/archive"

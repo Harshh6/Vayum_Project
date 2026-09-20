@@ -6,9 +6,11 @@ College project for **Data Science with Python**.
 ## What it does
 
 - Pick a state and city from all 36 states and union territories
-- Overall Air Quality Index (CPCB breakpoint methodology, not a plain average)
-- PM2.5, PM10, NO2, SO2, CO and O3 — real values from OpenAQ, with graceful
-  "N/A" when a pollutant genuinely has no data for that location
+- CPCB real-time air-quality data from India's Government Open Data Platform,
+  with OpenAQ as an explicitly labelled fallback
+- Official CPCB AQI when supplied; otherwise the existing CPCB-style AQI
+  calculation is used and stored separately
+- PM2.5, PM10, NO2, SO2, CO and O3 with graceful missing-value handling
 - Last 7 days of air quality as a chart, backed by SQLite + pandas cleaning
 - Next 24 hours air quality prediction from a trained scikit-learn model
 - 7-day weather forecast (WeatherAPI.com, falling back to Open-Meteo)
@@ -41,9 +43,10 @@ cp .env.example .env
 - `WEATHER_API_KEY` — free key from https://www.weatherapi.com/. If left
   blank, weather automatically falls back to Open-Meteo (no key needed,
   slightly less detailed).
-- `OPENAQ_API_KEY` — free key from https://docs.openaq.org/. Required for
-  air-quality data; without it, air-quality sections show "Unavailable"
-  rather than fake numbers.
+- `OPENAQ_API_KEY` — free key from https://docs.openaq.org/. Used only as
+  the fallback source when CPCB is unavailable.
+- `CPCB_API_KEY` — API key for the official data.gov.in CPCB resource
+  `3b01bcb8-0b14-4abf-b6f2-c1bfd384ba69`. Keep it only in `.env`.
 - `SECRET_KEY` — any random string, used for Flask sessions.
 - `AIR_QUALITY_CACHE_MINUTES` / `WEATHER_CACHE_MINUTES` — how long a reading
   is reused before the app calls the APIs again (defaults: 60 / 120).
@@ -67,8 +70,8 @@ python app.py
 ```
 
 Open `http://localhost:5000`. Selecting a city triggers, on first load:
-OpenAQ (current + recent history) → Open-Meteo (historical weather for
-those same days) → pandas cleaning/merging → CPCB AQI calculation → SQLite
+data.gov.in CPCB (current) → OpenAQ fallback → Open-Meteo (historical weather)
+→ pandas cleaning/merging → AQI processing → SQLite
 cache. Subsequent visits within the cache window are served straight from
 the database.
 
@@ -107,8 +110,9 @@ database/
   db.py                   sqlite3 connection + CRUD helpers
 
 services/
+  cpcb.py                 data.gov.in CPCB real-time client (primary source)
   aqi.py                  CPCB breakpoint sub-index AQI calculation
-  openaq.py               OpenAQ v3 client (current + historical pollutants)
+  openaq.py               OpenAQ v3 client (fallback pollutants)
   weather.py              WeatherAPI.com client
   open_meteo.py           Open-Meteo client (keyless fallback + historical weather)
 

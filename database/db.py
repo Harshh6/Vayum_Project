@@ -35,6 +35,10 @@ def init_db():
         schema = f.read()
     with get_connection() as conn:
         conn.executescript(schema)
+        columns = {row[1] for row in conn.execute("PRAGMA table_info(air_quality)")}
+        for name, definition in (("cpcb_aqi", "INTEGER"), ("calculated_aqi", "INTEGER"), ("station", "TEXT")):
+            if name not in columns:
+                conn.execute(f"ALTER TABLE air_quality ADD COLUMN {name} {definition}")
 
 
 # ---------------------------------------------------------------------------
@@ -80,19 +84,23 @@ def save_air_quality(location_id, reading):
             """
             INSERT INTO air_quality
                 (location_id, recorded_at, pm25, pm10, no2, so2, co, o3,
-                 aqi, aqi_category, source, fetched_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                aqi, cpcb_aqi, calculated_aqi, aqi_category, station, source, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(location_id, recorded_at) DO UPDATE SET
                 pm25=excluded.pm25, pm10=excluded.pm10, no2=excluded.no2,
                 so2=excluded.so2, co=excluded.co, o3=excluded.o3,
-                aqi=excluded.aqi, aqi_category=excluded.aqi_category,
+                aqi=excluded.aqi, cpcb_aqi=excluded.cpcb_aqi,
+                calculated_aqi=excluded.calculated_aqi,
+                aqi_category=excluded.aqi_category, station=excluded.station,
                 source=excluded.source, fetched_at=excluded.fetched_at
             """,
             (
                 location_id, reading["recorded_at"], reading.get("pm25"),
                 reading.get("pm10"), reading.get("no2"), reading.get("so2"),
                 reading.get("co"), reading.get("o3"), reading.get("aqi"),
-                reading.get("aqi_category"), reading.get("source", "openaq"),
+                reading.get("cpcb_aqi"),
+                reading.get("calculated_aqi"), reading.get("aqi_category"),
+                reading.get("station"), reading.get("source", "openaq"),
                 _now(),
             ),
         )

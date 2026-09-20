@@ -21,7 +21,7 @@ import pandas as pd
 from config import Config
 from database import db
 from data_collection.locations import get_coordinates
-from services import openaq, weather as weather_service
+from services import cpcb, openaq, weather as weather_service
 from services.aqi import calculate_overall_aqi, category_for, HEALTH_NOTES
 
 POLLUTANT_META = {
@@ -81,28 +81,43 @@ def get_air_quality_data(city, state):
     location_id = location_row["id"]
 
     cached = db.get_latest_air_quality(location_id, max_age_minutes=Config.AIR_QUALITY_CACHE_MINUTES)
-    if cached and cached.get("aqi") is not None:
+    cpcb_aqi = None
+    if cached and cached.get("aqi") is not None and cached.get("source") in {"cpcb", "openaq"}:
         values = {k: cached.get(k) for k in POLLUTANT_META}
         aqi, aqi_category = cached.get("aqi"), cached.get("aqi_category")
         recorded_at = cached["recorded_at"]
+        source = cached.get("source")
     else:
-        station_id = _ensure_openaq_station(location_row, lat, lon)
-        values = openaq.get_current_measurements(station_id) if station_id else {}
-        has_openaq_values = any(value is not None for value in values.values())
-        source = "openaq" if has_openaq_values else "open-meteo-air-quality"
-        if not has_openaq_values and lat is not None and lon is not None:
-            from services import open_meteo
-            values = open_meteo.get_current_air_quality(lat, lon)
+        cpcb_reading = cpcb.get_current(city, state)
+        cpcb_aqi = cpcb_reading.get("aqi") if cpcb_reading else None
+        station_name = cpcb_reading.get("station") if cpcb_reading else None
+        if cpcb_reading:
+            values = {k: cpcb_reading.get(k) for k in POLLUTANT_META}
+            source = "cpcb"
+        else:
+            station_id = _ensure_openaq_station(location_row, lat, lon)
+            values = openaq.get_current_measurements(station_id) if station_id else {}
+            source = "openaq" if any(value is not None for value in values.values()) else "unavailable"
         values = {k: values.get(k) for k in POLLUTANT_META}  # ensure every key exists
-        aqi, label, level, main_pollutant = calculate_overall_aqi(values)
+        calculated_aqi, label, level, main_pollutant = calculate_overall_aqi(values)
+        aqi = cpcb_aqi if cpcb_aqi is not None else calculated_aqi
         aqi_category = level
         recorded_at = datetime.utcnow().isoformat(timespec="minutes")
         db.save_air_quality(location_id, {
             "recorded_at": recorded_at, **values,
-            "aqi": aqi, "aqi_category": aqi_category, "source": source,
+            "aqi": aqi, "cpcb_aqi": cpcb_aqi, "calculated_aqi": calculated_aqi,
+            "aqi_category": aqi_category, "station": station_name, "source": source,
         })
+        if aqi is not None:
+            db.save_historical_rows(location_id, [{
+                "date": recorded_at[:10], **values, "aqi": aqi, "source": source,
+            }])
 
     aqi_val, label, level, main_key = calculate_overall_aqi(values)
+    if cached and cached.get("aqi") is not None and cached.get("source") in {"cpcb", "openaq"}:
+        aqi_val = cached["aqi"]
+    elif cpcb_aqi is not None:
+        aqi_val = cpcb_aqi
     pollutants = _build_pollutants_payload(values)
     main_name = POLLUTANT_META[main_key]["name"] if main_key else "N/A"
 
@@ -112,6 +127,7 @@ def get_air_quality_data(city, state):
         "level": level,
         "health_note": HEALTH_NOTES.get(level, "Air-quality data is currently unavailable for this location."),
         "main_pollutant": main_name,
+        "source": source if "source" in locals() else "unavailable",
         "pollutants": pollutants,
         "updated": datetime.fromisoformat(recorded_at).strftime("%d %b %Y, %I:%M %p"),
     }
@@ -132,9 +148,6 @@ def get_history_data(city, state, days=7):
     if not wanted_dates.issubset(have_dates):
         station_id = _ensure_openaq_station(location_row, lat, lon)
         pollutant_rows = openaq.get_historical_measurements(station_id, days=days) if station_id else []
-        if not pollutant_rows and lat is not None and lon is not None:
-            from services import open_meteo
-            pollutant_rows = open_meteo.get_historical_air_quality(lat, lon, days=days)
         weather_rows = []
         if lat is not None and lon is not None:
             from services import open_meteo
@@ -187,7 +200,7 @@ def _merge_history_with_pandas(pollutant_rows, weather_rows):
             "date": row["date"], **values, "aqi": aqi,
             "temp_c": row.get("temp_c"), "humidity": row.get("humidity"),
             "wind_kph": row.get("wind_kph"), "pressure_mb": row.get("pressure_mb"),
-            "precip_mm": row.get("precip_mm"), "source": "openaq+open-meteo",
+            "precip_mm": row.get("precip_mm"), "source": "openaq",
         })
     return rows
 

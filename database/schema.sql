@@ -24,7 +24,10 @@ CREATE TABLE IF NOT EXISTS air_quality (
     co           REAL,
     o3           REAL,
     aqi          INTEGER,
+    cpcb_aqi     INTEGER,
+    calculated_aqi INTEGER,
     aqi_category TEXT,
+    station      TEXT,
     source       TEXT,                -- e.g. "openaq" or "fallback"
     fetched_at   TEXT NOT NULL,
     UNIQUE(location_id, recorded_at)
@@ -81,7 +84,5 @@ CREATE TABLE IF NOT EXISTS predictions (
     UNIQUE(location_id, generated_at, target_time)
 );
 
-CREATE INDEX IF NOT EXISTS idx_air_quality_location ON air_quality(location_id, recorded_at);
-CREATE INDEX IF NOT EXISTS idx_weather_location ON weather(location_id, recorded_at);
 CREATE INDEX IF NOT EXISTS idx_historical_location ON historical_data(location_id, date);
 CREATE INDEX IF NOT EXISTS idx_predictions_location ON predictions(location_id, generated_at);
