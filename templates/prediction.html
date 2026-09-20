@@ -1,0 +1,64 @@
+{% extends "base.html" %}
+{% set active = 'home' %}
+{% block title %}24-hour air quality prediction{% endblock %}
+
+{% block content %}
+<section class="wrap block prediction-page">
+  <div class="block-head">
+    <h1>Next 24 Hours - Air Quality Prediction</h1>
+    <p>Predicted air quality for {{ city }}, {{ state }}. Model: {{ prediction["model"] }}</p>
+  </div>
+
+  <div class="prediction-summary">
+    <div class="prediction-stat">
+      <span class="prediction-stat-label">Overall Air Quality at next reading</span>
+      <strong class="prediction-stat-value">{{ prediction["values"][0] if prediction["values"] and prediction["values"][0] is not none else "N/A" }}</strong>
+    </div>
+    <div class="prediction-stat">
+      <span class="prediction-stat-label">Highest predicted Air Quality</span>
+      {% set known_values = prediction["values"]|select("number")|list %}
+      <strong class="prediction-stat-value">{{ known_values|max if known_values else "N/A" }}</strong>
+    </div>
+  </div>
+
+  <div class="panel">
+    <div class="block-head">
+      <h2>Overall Air Quality forecast</h2>
+      <p>Exact predicted AQI value for every hour.</p>
+    </div>
+    <div class="chart-box prediction-chart"><canvas id="overallPredictionChart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <div class="block-head">
+      <h2>Pollutant predictions</h2>
+      <p>Predicted concentration of every measured pollutant over the next 24 hours.</p>
+    </div>
+    <div class="chart-box prediction-chart"><canvas id="pollutantPredictionChart"></canvas></div>
+    <div class="prediction-table">
+      <table>
+        <thead><tr><th>Pollutant</th><th>Unit</th><th>First prediction</th><th>Highest prediction</th></tr></thead>
+        <tbody>
+          {% for pollutant in prediction.pollutants %}
+          <tr>
+            <td>{{ pollutant.name|safe }}</td>
+            <td>{{ pollutant.unit }}</td>
+            {% set p_known = pollutant["values"]|select("number")|list %}
+            <td>{{ pollutant["values"][0] if pollutant["values"] and pollutant["values"][0] is not none else "N/A" }}</td>
+            <td>{{ p_known|max if p_known else "N/A" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  window.VAYUM_PREDICTION = {{ prediction|tojson }};
+</script>
+<script src="{{ url_for('static', filename='js/prediction.js') }}"></script>
+{% endblock %}

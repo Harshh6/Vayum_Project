@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% set active = 'help' %}
+{% block title %}Help us — Vayum{% endblock %}
+{% block content %}
+<section class="wrap prose">
+  <h1>Help us</h1>
+  <p class="lead">Vayum is a student project and it improves fastest with real feedback from people who live in the cities it covers.</p>
+
+  <h2>Report a wrong reading</h2>
+  <p>If a value looks far off for your area, note the city, the pollutant and the time you saw it, and send it across. Local readings vary a lot between neighbourhoods, and those gaps are worth mapping.</p>
+
+  <h2>Add a city</h2>
+  <p>The location list lives in <code>data/locations.json</code>. Tell us which city is missing and which state it belongs to, and it goes in the next update.</p>
+
+  <h2>Contribute data or code</h2>
+  <ul class="plain">
+    <li>Historical pollutant datasets for Indian cities</li>
+    <li>Better feature ideas for the 24-hour forecast model</li>
+    <li>Accessibility and mobile layout fixes</li>
+  </ul>
+
+  <h2>Reduce what you add to the air</h2>
+  <p>Share rides on high-AQI days, avoid burning waste and garden leaves, keep vehicles serviced, and check the forecast before planning outdoor exercise. Small local choices move these numbers.</p>
+
+  <h2>Get in touch</h2>
+  <p>Write to <a href="mailto:hello@vayum.in">hello@vayum.in</a> with the subject line of the section above that fits.</p>
+</section>
+{% endblock %}

@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% set active = 'about' %}
+{% block title %}About Vayum{% endblock %}
+{% block content %}
+<section class="wrap prose">
+  <h1>About Vayum</h1>
+  <p class="lead">Vayum brings air quality for Indian cities into one clear page: what you are breathing now, what the last week looked like, and what the next day is likely to bring.</p>
+
+  <h2>Why it exists</h2>
+  <p>Air quality numbers are published widely, but they are scattered across dashboards that assume you already know what a PM2.5 reading means. Vayum takes the six pollutants that matter, combines them into one index, and says plainly whether it is a good day to be outside.</p>
+
+  <h2>How a reading is built</h2>
+  <ol class="steps">
+    <li><strong>Collect</strong> — pollutant readings for the selected city are pulled from a monitoring source.</li>
+    <li><strong>Clean</strong> — missing and out-of-range values are handled with pandas before anything is shown.</li>
+    <li><strong>Combine</strong> — each pollutant is scaled against its safe limit; the worst sub-index becomes the overall AQI, as CPCB does it.</li>
+    <li><strong>Forecast</strong> — past readings and weather are used to train a model that projects the next 24 hours.</li>
+  </ol>
+
+  <h2>Where the project stands</h2>
+  <p>The interface, the location data and the Flask structure are complete. The prediction model is not trained yet, so the 24-hour chart shows placeholder values and is labelled as such. Nothing on this site should be used for health decisions.</p>
+
+  <h2>Built with</h2>
+  <p>Python, Flask, Jinja2, HTML, CSS and JavaScript, with Chart.js for the graphs. Pandas, NumPy and scikit-learn come in at the data stage.</p>
+
+  <div class="about-brand">
+    <img src="{{ url_for('vayum_logo') }}" alt="Vayum">
+    <p>Built by Students, For Nature</p>
+  </div>
+</section>
+{% endblock %}

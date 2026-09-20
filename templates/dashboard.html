@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% set active = 'home' %}
+{% block title %}Vayum — Air quality in {{ city }}{% endblock %}
+
+{% block content %}
+<section class="wrap block prediction-hero">
+  <a class="prediction-card-link" href="{{ url_for('prediction_page') }}">
+  <div class="panel panel-forecast">
+    <div class="block-head">
+      <h1>Next 24 Hours - Air Quality Prediction</h1>
+      <p>See the next day's overall Air Quality and pollutant forecast for {{ city }}, {{ state }}.</p>
+    </div>
+    <div class="chart-box"><canvas id="predictionChart"></canvas></div>
+  </div>
+  </a>
+</section>
+
+<section class="wrap reading">
+  <div class="reading-text">
+    <p class="reading-place">{{ city }}, {{ state }}</p>
+    <h1 class="reading-head">The air here is<br><span class="lvl-{{ air.level }}">{{ air.label|lower }}</span> right now</h1>
+    <p class="reading-note">{{ air.health_note }}</p>
+    <dl class="reading-meta">
+      <div><dt>Leading pollutant</dt><dd>{{ air.main_pollutant }}</dd></div>
+      <div><dt>Last updated</dt><dd>{{ air.updated }}</dd></div>
+    </dl>
+  </div>
+
+  <figure class="gauge" data-aqi="{{ air.aqi if air.aqi is not none else 0 }}">
+    <svg viewBox="0 0 320 220" role="img" aria-label="Air quality index {{ air.aqi if air.aqi is not none else 'unavailable' }}, {{ air.label }}">
+      <g fill="none" stroke-width="16" stroke-linecap="butt">
+        <path d="M40,170 A120,120 0 0 1 280,170" stroke="#3FA34D" stroke-dasharray="37.7 999" stroke-dashoffset="0"/>
+        <path d="M40,170 A120,120 0 0 1 280,170" stroke="#9ACA3C" stroke-dasharray="37.7 999" stroke-dashoffset="-37.7"/>
+        <path d="M40,170 A120,120 0 0 1 280,170" stroke="#F2C037" stroke-dasharray="75.4 999" stroke-dashoffset="-75.4"/>
+        <path d="M40,170 A120,120 0 0 1 280,170" stroke="#F0862E" stroke-dasharray="75.4 999" stroke-dashoffset="-150.8"/>
+        <path d="M40,170 A120,120 0 0 1 280,170" stroke="#E05252" stroke-dasharray="75.4 999" stroke-dashoffset="-226.2"/>
+        <path d="M40,170 A120,120 0 0 1 280,170" stroke="#9B3A6A" stroke-dasharray="75.4 999" stroke-dashoffset="-301.6"/>
+      </g>
+      <g id="needle" transform="rotate(-90 160 170)">
+        <line x1="160" y1="170" x2="160" y2="72" stroke="#14201D" stroke-width="3" stroke-linecap="round"/>
+        <circle cx="160" cy="170" r="7" fill="#14201D"/>
+      </g>
+      <circle cx="160" cy="130" r="29" class="gauge-value-backdrop"/>
+      <text x="160" y="130" class="gauge-value">{{ air.aqi if air.aqi is not none else "—" }}</text>
+      <text x="160" y="202" class="gauge-label">Air Quality</text>
+      <text x="34" y="190" class="gauge-scale">0</text>
+      <text x="286" y="190" class="gauge-scale">500</text>
+    </svg>
+    <figcaption>Calculated from all six pollutants below, on the CPCB scale.</figcaption>
+  </figure>
+</section>
+
+<section class="wrap block">
+  <div class="block-head">
+    <h2>Pollutants measured</h2>
+    <p>Each bar shows how close the reading is to the safe daily limit.</p>
+  </div>
+  <div class="pollutants">
+    {% for p in air.pollutants %}
+    <article class="pollutant" tabindex="0" role="button" aria-expanded="false">
+      <h3>{{ p.name|safe }}</h3>
+      <p class="p-value">{{ p.value if p.value is not none else "N/A" }}<span>{{ p.unit }}</span></p>
+      <div class="p-bar"><i style="width: {{ [ (p.value / p.limit * 100)|round(0,'floor')|int, 100 ]|min if p.value is not none else 0 }}%"></i></div>
+      <p class="p-about">{{ p.about }}</p>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+
+<section class="wrap block history-section">
+  <a class="history-card-link" href="{{ url_for('history_page') }}">
+  <div class="panel">
+    <div class="block-head">
+      <h1>Last 7 Days - Air Quality History</h1>
+      <p>Daily average air quality index recorded for {{ city }}.</p>
+    </div>
+    <div class="chart-box"><canvas id="historyChart"></canvas></div>
+  </div>
+  </a>
+</section>
+
+<section class="wrap block">
+  <div class="block-head">
+    <h2>Weather over the next 7 days</h2>
+    <p>Temperature, humidity and wind shape how pollution builds up or clears.</p>
+  </div>
+  <div class="weather">
+    {% for d in weather %}
+    <article class="wx" tabindex="0" role="button" aria-expanded="false">
+      <p class="wx-day">{{ d.day }}</p>
+      <p class="wx-date">{{ d.date }}</p>
+      <p class="wx-icon" data-icon="{{ d.icon }}">{{ {'sun':'☀','cloud-sun':'⛅','cloud':'☁','rain':'🌧'}[d.icon] }}</p>
+      <p class="wx-temp">{{ d.temp }}°<span>/ {{ d.temp_min }}°</span></p>
+      <p class="wx-cond">{{ d.condition }}</p>
+      <ul class="wx-list">
+        <li>Humidity<span>{{ d.humidity }}%</span></li>
+        <li>Wind<span>{{ d.wind }} km/h</span></li>
+        <li>Rain<span>{{ d.rain_chance }}%</span></li>
+      </ul>
+    </article>
+    {% endfor %}
+  </div>
+</section>
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<script>
+  window.VAYUM = {
+    history: {{ history|tojson }},
+    prediction: {{ prediction|tojson }}
+  };
+</script>
+<script src="{{ url_for('static', filename='js/charts.js') }}"></script>
+{% endblock %}

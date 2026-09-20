@@ -1,0 +1,10 @@
+Flask==3.0.3
+python-dotenv==1.0.1
+requests==2.32.3
+pandas==2.2.3
+numpy==2.1.3
+scikit-learn==1.6.1
+joblib==1.4.2
+matplotlib==3.10.1
+geopy==2.4.1
+python-dotenv

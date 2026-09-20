@@ -1,0 +1,14 @@
+{
+  "chosen_model": "RandomForestRegressor",
+  "random_forest": {
+    "mae": 14.227500000000001,
+    "rmse": 17.772309219682175,
+    "r2": -0.11412689594356262
+  },
+  "linear_regression": {
+    "mae": 1517.724489157361,
+    "rmse": 1563.3727032419038,
+    "r2": -8620.284688683943
+  },
+  "training_rows": 20
+}
