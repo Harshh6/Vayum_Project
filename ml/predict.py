@@ -27,6 +27,7 @@ import numpy as np
 from config import Config
 from database import db
 from ml.preprocessing import build_feature_frame, latest_feature_row
+from services import open_meteo
 
 # Rough within-day multiplier: pollution tends to be higher early morning /
 # evening (traffic, temperature inversion) and lower mid-afternoon.
@@ -42,11 +43,37 @@ def _load_model():
     return joblib.load(Config.MODEL_PATH)
 
 
-def predict_next_24h(location_id, current_aqi, current_pollutants):
+def predict_next_24h(location_id, current_aqi, current_pollutants,
+                     latitude=None, longitude=None, hours=24):
     """current_pollutants: dict {key: value_or_None} for the six pollutants."""
+    if hours <= 0:
+        return {"labels": [], "values": [], "model": "Unavailable", "pollutants": []}
+
+    if latitude is not None and longitude is not None:
+        hourly_forecast = open_meteo.get_air_quality_forecast(latitude, longitude, hours)
+        if len(hourly_forecast) == hours:
+            return {
+                "labels": [datetime.fromisoformat(row["recorded_at"]).strftime("%H:%M")
+                           for row in hourly_forecast],
+                "values": [row["aqi"] for row in hourly_forecast],
+                "model": "Open-Meteo hourly forecast (CPCB AQI)",
+                "pollutants": [
+                    {
+                        "name": meta_name(key),
+                        "unit": meta_unit(key),
+                        "values": [
+                            round(row["pollutants"].get(key), 1)
+                            if row["pollutants"].get(key) is not None else None
+                            for row in hourly_forecast
+                        ],
+                    }
+                    for key in current_pollutants
+                ],
+            }
+
     bundle = _load_model()
     now = datetime.utcnow()
-    labels = [(now + timedelta(hours=h)).strftime("%H:%M") for h in range(1, 25)]
+    labels = [(now + timedelta(hours=h)).strftime("%H:%M") for h in range(1, hours + 1)]
 
     if current_aqi is None:
         # Nothing to anchor a forecast to.
@@ -72,7 +99,7 @@ def predict_next_24h(location_id, current_aqi, current_pollutants):
         else:
             next_day_aqi = float(bundle["model"].predict(features)[0])
             next_day_aqi = max(0.0, min(500.0, next_day_aqi))
-            values = _interpolate_curve(current_aqi, next_day_aqi)
+            values = _interpolate_curve(current_aqi, next_day_aqi, hours)
             model_name = bundle["name"]
 
     pollutant_series = []
@@ -92,9 +119,14 @@ def predict_next_24h(location_id, current_aqi, current_pollutants):
     }
 
 
-def _interpolate_curve(current_aqi, next_day_aqi):
-    base = np.linspace(current_aqi, next_day_aqi, 24)
-    curve = base * _DIURNAL_PATTERN
+def _interpolate_curve(current_aqi, next_day_aqi, hours=24):
+    base = np.linspace(current_aqi, next_day_aqi, hours)
+    pattern = np.interp(
+        np.linspace(0, len(_DIURNAL_PATTERN) - 1, hours),
+        np.arange(len(_DIURNAL_PATTERN)),
+        _DIURNAL_PATTERN,
+    )
+    curve = base * pattern
     # Re-anchor so the curve's mean still matches the model's actual estimate.
     curve = curve * (np.mean([current_aqi, next_day_aqi]) / curve.mean())
     return np.clip(curve, 0, 500).tolist()

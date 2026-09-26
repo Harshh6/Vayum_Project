@@ -1,14 +1,35 @@
 {
-  "chosen_model": "RandomForestRegressor",
-  "random_forest": {
-    "mae": 14.227500000000001,
-    "rmse": 17.772309219682175,
-    "r2": -0.11412689594356262
-  },
-  "linear_regression": {
-    "mae": 1517.724489157361,
-    "rmse": 1563.3727032419038,
-    "r2": -8620.284688683943
-  },
-  "training_rows": 20
+  "chosen_model": "Hourly RandomForest with persistence selection",
+  "training_rows": 5858,
+  "hourly_records": 6479,
+  "validation_window_days": 14,
+  "locations": {
+    "New Delhi, Delhi": {
+      "training_origins": 1616,
+      "validation_origins": 312,
+      "model_mae": 25.45038262938172,
+      "model_rmse": 35.66862689424113,
+      "model_r2": 0.7288579483903183,
+      "persistence_mae": 67.36431623931624,
+      "selected_model_horizons": 23
+    },
+    "Bengaluru, Karnataka": {
+      "training_origins": 1616,
+      "validation_origins": 313,
+      "model_mae": 15.073994438166359,
+      "model_rmse": 20.62595384417138,
+      "model_r2": 0.3691703645258282,
+      "persistence_mae": 24.37752928647497,
+      "selected_model_horizons": 22
+    },
+    "Pune, Maharashtra": {
+      "training_origins": 1616,
+      "validation_origins": 313,
+      "model_mae": 26.835696224126366,
+      "model_rmse": 36.61356968660051,
+      "model_r2": 0.14362786113715462,
+      "persistence_mae": 25.776624068157616,
+      "selected_model_horizons": 12
+    }
+  }
 }

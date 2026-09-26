@@ -45,6 +45,15 @@ LOCATIONS = load_locations()
 STATES = sorted(LOCATIONS.keys())
 
 
+def _selected_location():
+    city, state = session.get("city"), session.get("state")
+    if state not in LOCATIONS or city not in LOCATIONS[state]:
+        session.pop("city", None)
+        session.pop("state", None)
+        return None, None
+    return city, state
+
+
 # ---------------------------------------------------------------------------
 # Safe wrappers - never let a data-source failure leak a stack trace to the
 # user; fall back to a clearly-labelled "unavailable" payload instead.
@@ -117,7 +126,7 @@ def select_location():
 
 @app.route("/dashboard")
 def dashboard():
-    city, state = session.get("city"), session.get("state")
+    city, state = _selected_location()
     if not city or not state:
         return redirect(url_for("index"))
     return render_template(
@@ -134,7 +143,7 @@ def dashboard():
 
 @app.route("/prediction")
 def prediction_page():
-    city, state = session.get("city"), session.get("state")
+    city, state = _selected_location()
     if not city or not state:
         return redirect(url_for("index"))
     return render_template(
@@ -148,7 +157,7 @@ def prediction_page():
 
 @app.route("/history")
 def history_page():
-    city, state = session.get("city"), session.get("state")
+    city, state = _selected_location()
     if not city or not state:
         return redirect(url_for("index"))
     history = _safe_history(city, state)
@@ -164,14 +173,14 @@ def history_page():
 
 @app.route("/about")
 def about():
-    return render_template("about.html", city=session.get("city"),
-                           state=session.get("state"), states=STATES)
+    city, state = _selected_location()
+    return render_template("about.html", city=city, state=state, states=STATES)
 
 
 @app.route("/help")
 def help_page():
-    return render_template("help.html", city=session.get("city"),
-                           state=session.get("state"), states=STATES)
+    city, state = _selected_location()
+    return render_template("help.html", city=city, state=state, states=STATES)
 
 
 @app.route("/change-location")
@@ -191,8 +200,8 @@ def api_cities(state):
 
 @app.route("/api/air-quality")
 def api_air_quality():
-    city, state = session.get("city"), session.get("state")
-    if not city:
+    city, state = _selected_location()
+    if not city or not state:
         return jsonify({"error": True, "message": "No location selected"}), 400
     try:
         return jsonify(get_air_quality_data(city, state))

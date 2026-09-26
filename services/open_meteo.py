@@ -8,15 +8,20 @@ Used for:
      features (WeatherAPI's free tier does not give long history).
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import requests
 
 from config import Config
+from services.aqi import calculate_overall_aqi
 
 _WMO_TO_ICON = {
     range(0, 2): "sun", range(2, 4): "cloud-sun",
     range(4, 70): "cloud", range(51, 68): "rain", range(80, 100): "rain",
+}
+_AIR_QUALITY_COLUMNS = {
+    "pm25": "pm2_5", "pm10": "pm10", "no2": "nitrogen_dioxide",
+    "so2": "sulphur_dioxide", "co": "carbon_monoxide", "o3": "ozone",
 }
 
 
@@ -108,36 +113,88 @@ def get_forecast(latitude, longitude, days=7):
     return {"current": current_out, "forecast": forecast_out}
 
 
-def get_current_air_quality(latitude, longitude):
-    """Return modeled current air quality when no OpenAQ station is available."""
+def _get_hourly_air_quality_data(latitude, longitude, forecast_days, include_current=False,
+                                 past_days=1):
+    params = {
+        "latitude": latitude,
+        "longitude": longitude,
+        "hourly": ",".join(_AIR_QUALITY_COLUMNS.values()),
+        "past_days": past_days,
+        "forecast_days": forecast_days,
+        "timezone": "auto",
+    }
+    if include_current:
+        params["current"] = ",".join(_AIR_QUALITY_COLUMNS.values())
     try:
         resp = requests.get(
             Config.OPEN_METEO_AIR_QUALITY_URL,
-            params={
-                "latitude": latitude,
-                "longitude": longitude,
-                "current": "pm10,pm2_5,nitrogen_dioxide,sulphur_dioxide,carbon_monoxide,ozone",
-                "timezone": "auto",
-            },
+            params=params,
             timeout=Config.REQUEST_TIMEOUT,
         )
         resp.raise_for_status()
-        current = resp.json().get("current", {})
-    except requests.RequestException:
+        payload = resp.json()
+    except (requests.RequestException, ValueError):
+        return None
+
+    hourly = payload.get("hourly") or {}
+    rows = []
+    for index, recorded_at in enumerate(hourly.get("time") or []):
+        try:
+            timestamp = datetime.fromisoformat(recorded_at)
+        except (TypeError, ValueError):
+            return None
+        pollutants = {}
+        for key, column in _AIR_QUALITY_COLUMNS.items():
+            values = hourly.get(column) or []
+            value = values[index] if index < len(values) else None
+            if key == "co" and value is not None:
+                value /= 1000
+            pollutants[key] = value
+        rows.append((timestamp, pollutants))
+    return payload, rows
+
+
+def _rolling_pollutant_values(rows, index):
+    rolling_values = {}
+    for key in _AIR_QUALITY_COLUMNS:
+        window = 8 if key in {"co", "o3"} else 24
+        minimum_samples = 6 if window == 8 else 16
+        samples = [
+            row[key] for _, row in rows[max(0, index - window + 1):index + 1]
+            if row[key] is not None
+        ]
+        rolling_values[key] = (
+            sum(samples) / len(samples) if len(samples) >= minimum_samples else None
+        )
+    return rolling_values
+
+
+def get_current_air_quality(latitude, longitude):
+    """Return current modeled concentrations averaged for CPCB AQI windows."""
+    result = _get_hourly_air_quality_data(latitude, longitude, forecast_days=1, include_current=True)
+    if result is None:
         return {}
 
-    return {
-        "pm25": current.get("pm2_5"),
-        "pm10": current.get("pm10"),
-        "no2": current.get("nitrogen_dioxide"),
-        "so2": current.get("sulphur_dioxide"),
-        "co": current.get("carbon_monoxide") / 1000 if current.get("carbon_monoxide") is not None else None,
-        "o3": current.get("ozone"),
-    }
+    payload, rows = result
+    current_time = (payload.get("current") or {}).get("time")
+    try:
+        current_timestamp = datetime.fromisoformat(current_time)
+    except (TypeError, ValueError):
+        try:
+            utc_offset = int(payload.get("utc_offset_seconds", 0))
+        except (TypeError, ValueError):
+            return {}
+        current_timestamp = datetime.utcnow() + timedelta(seconds=utc_offset)
+        current_timestamp = current_timestamp.replace(minute=0, second=0, microsecond=0)
+
+    current_indices = [i for i, (timestamp, _) in enumerate(rows) if timestamp <= current_timestamp]
+    if not current_indices:
+        return {}
+    return _rolling_pollutant_values(rows, current_indices[-1])
 
 
 def get_historical_air_quality(latitude, longitude, days=7):
-    """Return daily averages of modeled air quality for ML history fallback."""
+    """Aggregate hourly modeled air quality into CPCB-ready daily inputs."""
     try:
         resp = requests.get(
             Config.OPEN_METEO_AIR_QUALITY_URL,
@@ -156,24 +213,107 @@ def get_historical_air_quality(latitude, longitude, days=7):
     except requests.RequestException:
         return []
 
-    daily = {}
+    hourly_rows = []
     for index, timestamp in enumerate(hourly.get("time", [])):
-        date = timestamp[:10]
-        daily.setdefault(date, {key: [] for key in ("pm25", "pm10", "no2", "so2", "co", "o3")})
-        source_values = {
-            "pm25": hourly.get("pm2_5", []), "pm10": hourly.get("pm10", []),
-            "no2": hourly.get("nitrogen_dioxide", []), "so2": hourly.get("sulphur_dioxide", []),
-            "co": hourly.get("carbon_monoxide", []), "o3": hourly.get("ozone", []),
-        }
-        for key, values in source_values.items():
-            if index < len(values) and values[index] is not None:
-                value = values[index] / 1000 if key == "co" else values[index]
-                daily[date][key].append(value)
+        values = {}
+        for key, column in _AIR_QUALITY_COLUMNS.items():
+            source_values = hourly.get(column, [])
+            value = source_values[index] if index < len(source_values) else None
+            if key == "co" and value is not None:
+                value /= 1000
+            values[key] = value
+        hourly_rows.append((datetime.fromisoformat(timestamp), values))
 
-    return [
-        {"date": date, **{key: sum(values) / len(values) for key, values in pollutants.items() if values}}
-        for date, pollutants in sorted(daily.items())
-    ]
+    daily_rows = []
+    dates = sorted({timestamp.date().isoformat() for timestamp, _ in hourly_rows})
+    for date in dates:
+        day_indices = [i for i, (timestamp, _) in enumerate(hourly_rows)
+                       if timestamp.date().isoformat() == date]
+        daily_values = {}
+        for key in _AIR_QUALITY_COLUMNS:
+            if key in {"co", "o3"}:
+                rolling_means = []
+                for index in day_indices:
+                    samples = [
+                        row[key] for _, row in hourly_rows[max(0, index - 7):index + 1]
+                        if row[key] is not None
+                    ]
+                    if len(samples) >= 6:
+                        rolling_means.append(sum(samples) / len(samples))
+                if rolling_means:
+                    daily_values[key] = max(rolling_means)
+            else:
+                samples = [hourly_rows[index][1][key] for index in day_indices
+                           if hourly_rows[index][1][key] is not None]
+                if len(samples) >= 16:
+                    daily_values[key] = sum(samples) / len(samples)
+        daily_rows.append({"date": date, **daily_values, "source": "open-meteo"})
+    return daily_rows
+
+
+def get_historical_air_quality_hours(latitude, longitude, days=90):
+    """Return hourly concentrations and rolling CPCB AQI for model training."""
+    result = _get_hourly_air_quality_data(
+        latitude, longitude, forecast_days=0, past_days=days
+    )
+    if result is None:
+        return []
+
+    _, rows = result
+    hourly_rows = []
+    for index, (timestamp, pollutants) in enumerate(rows):
+        rolling_values = _rolling_pollutant_values(rows, index)
+        has_particulate = rolling_values["pm25"] is not None or rolling_values["pm10"] is not None
+        has_three_pollutants = sum(value is not None for value in rolling_values.values()) >= 3
+        aqi = calculate_overall_aqi(rolling_values)[0] if has_particulate and has_three_pollutants else None
+        hourly_rows.append({
+            "recorded_at": timestamp.isoformat(timespec="minutes"),
+            **pollutants,
+            "aqi": aqi,
+            "source": "open-meteo-hourly-history",
+        })
+    return hourly_rows
+
+
+def get_air_quality_forecast(latitude, longitude, hours=24):
+    """Return hourly pollutant forecasts with CPCB AQI for the next hours.
+
+    The API's preceding day supplies the rolling history needed by CPCB's
+    24-hour particulate/gas and 8-hour CO/O3 averaging windows.
+    """
+    if latitude is None or longitude is None or hours <= 0:
+        return []
+
+    result = _get_hourly_air_quality_data(latitude, longitude, forecast_days=2)
+    if result is None:
+        return []
+
+    payload, rows = result
+    try:
+        utc_offset = int(payload.get("utc_offset_seconds", 0))
+    except (TypeError, ValueError):
+        return []
+
+    local_now = datetime.utcnow() + timedelta(seconds=utc_offset)
+    first_forecast_hour = local_now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
+    first_index = next((i for i, (timestamp, _) in enumerate(rows)
+                        if timestamp >= first_forecast_hour), None)
+    if first_index is None or len(rows) - first_index < hours:
+        return []
+
+    forecasts = []
+    for index in range(first_index, first_index + hours):
+        rolling_values = _rolling_pollutant_values(rows, index)
+
+        has_particulate = rolling_values["pm25"] is not None or rolling_values["pm10"] is not None
+        has_three_pollutants = sum(value is not None for value in rolling_values.values()) >= 3
+        aqi = calculate_overall_aqi(rolling_values)[0] if has_particulate and has_three_pollutants else None
+        forecasts.append({
+            "recorded_at": rows[index][0].isoformat(),
+            "aqi": aqi,
+            "pollutants": rows[index][1],
+        })
+    return forecasts
 
 
 def get_historical_weather(latitude, longitude, start_date, end_date):

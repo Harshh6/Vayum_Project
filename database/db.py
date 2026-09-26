@@ -6,6 +6,7 @@ for a college project's traffic) with row_factory set so query results
 behave like dictionaries.
 """
 
+import json
 import sqlite3
 from contextlib import contextmanager
 from datetime import datetime, timedelta
@@ -15,6 +16,19 @@ from config import Config
 
 def _now():
     return datetime.utcnow().isoformat(timespec="seconds")
+
+
+def _supported_location_pairs():
+    with open(Config.LOCATIONS_FILE, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    pairs = {
+        (city, state["name"])
+        for state in raw["states"]
+        for city in state["cities"]
+    }
+    if not pairs:
+        raise ValueError("At least one supported location must be configured")
+    return pairs
 
 
 @contextmanager
@@ -31,6 +45,7 @@ def get_connection():
 
 def init_db():
     """Create every table if it does not exist yet. Safe to call every boot."""
+    supported_pairs = _supported_location_pairs()
     with open(Config.SCHEMA_PATH, "r", encoding="utf-8") as f:
         schema = f.read()
     with get_connection() as conn:
@@ -40,12 +55,29 @@ def init_db():
             if name not in columns:
                 conn.execute(f"ALTER TABLE air_quality ADD COLUMN {name} {definition}")
 
+        unsupported_ids = [
+            row["id"]
+            for row in conn.execute("SELECT id, city, state FROM locations")
+            if (row["city"], row["state"]) not in supported_pairs
+        ]
+        for table in ("air_quality", "weather", "historical_data", "predictions"):
+            conn.executemany(
+                f"DELETE FROM {table} WHERE location_id = ?",
+                ((location_id,) for location_id in unsupported_ids),
+            )
+        conn.executemany(
+            "DELETE FROM locations WHERE id = ?",
+            ((location_id,) for location_id in unsupported_ids),
+        )
+
 
 # ---------------------------------------------------------------------------
 # locations
 # ---------------------------------------------------------------------------
 
 def upsert_location(city, state, latitude=None, longitude=None, openaq_location_id=None):
+    if (city, state) not in _supported_location_pairs():
+        raise ValueError(f"Unsupported location: {city}, {state}")
     with get_connection() as conn:
         conn.execute(
             """
@@ -127,6 +159,52 @@ def get_latest_air_quality(location_id, max_age_minutes=None):
     return row
 
 
+def save_historical_air_quality_hours(location_id, rows):
+    fetched_at = _now()
+    values = [
+        (
+            location_id, row["recorded_at"], row.get("pm25"), row.get("pm10"),
+            row.get("no2"), row.get("so2"), row.get("co"), row.get("o3"),
+            row.get("aqi"), row.get("aqi"), row.get("source", "open-meteo-hourly-history"),
+            fetched_at,
+        )
+        for row in rows
+    ]
+    if not values:
+        return
+
+    with get_connection() as conn:
+        conn.executemany(
+            """
+            INSERT INTO air_quality
+                (location_id, recorded_at, pm25, pm10, no2, so2, co, o3,
+                 aqi, calculated_aqi, source, fetched_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(location_id, recorded_at) DO UPDATE SET
+                pm25=excluded.pm25, pm10=excluded.pm10, no2=excluded.no2,
+                so2=excluded.so2, co=excluded.co, o3=excluded.o3,
+                aqi=excluded.aqi, calculated_aqi=excluded.calculated_aqi,
+                source=excluded.source, fetched_at=excluded.fetched_at
+            WHERE air_quality.source = 'open-meteo-hourly-history'
+            """,
+            values,
+        )
+
+
+def get_historical_air_quality_hours(location_id):
+    with get_connection() as conn:
+        rows = conn.execute(
+            """
+            SELECT location_id, recorded_at, pm25, pm10, no2, so2, co, o3, aqi
+            FROM air_quality
+            WHERE location_id = ? AND source = 'open-meteo-hourly-history'
+            ORDER BY recorded_at
+            """,
+            (location_id,),
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
 # ---------------------------------------------------------------------------
 # weather
 # ---------------------------------------------------------------------------
@@ -165,11 +243,11 @@ def get_weather(location_id, kind, max_age_minutes=None, limit=7):
         rows = conn.execute(
             """
             SELECT * FROM weather WHERE location_id = ? AND kind = ?
-            ORDER BY recorded_at ASC LIMIT ?
+            ORDER BY recorded_at DESC LIMIT ?
             """,
             (location_id, kind, limit),
         ).fetchall()
-    rows = [dict(r) for r in rows]
+    rows = [dict(r) for r in reversed(rows)]
     if not rows:
         return []
     if max_age_minutes is not None:
