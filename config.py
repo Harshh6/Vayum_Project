@@ -31,7 +31,15 @@ class Config:
     # --- paths --------------------------------------------------------------
     DATA_DIR = os.path.join(BASE_DIR, "data")
     LOCATIONS_FILE = os.path.join(DATA_DIR, "locations.json")
-    DB_PATH = os.path.join(DATA_DIR, "vayum.db")
+
+    # Vercel's deployed filesystem is read-only.
+    # /tmp is writable and is used only when running on Vercel.
+    DB_PATH = (
+        "/tmp/vayum.db"
+        if os.environ.get("VERCEL")
+        else os.path.join(DATA_DIR, "vayum.db")
+    )
+
     SCHEMA_PATH = os.path.join(BASE_DIR, "database", "schema.sql")
     MODELS_DIR = os.path.join(BASE_DIR, "models")
     MODEL_PATH = os.path.join(MODELS_DIR, "aqi_model.joblib")
